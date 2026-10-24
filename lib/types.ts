@@ -43,8 +43,13 @@ export interface Guest {
   nationality: string
   company?: string
   vip?: boolean
+  /** Stays before this system went live (imported history). */
   stays: number
   preferences: string[]
+  blacklist?: { reason: string; at: string; by: string }
+  marketing?: boolean
+  notes?: string
+  anonymised?: boolean
   idType?: string
   idNumber?: string
 }
@@ -141,6 +146,9 @@ export type Module =
   | 'POS'
   | 'Housekeeping'
   | 'Maintenance'
+  | 'Guests'
+  | 'Rates'
+  | 'Settings'
   | 'System'
 
 export interface AuditEntry {
@@ -190,6 +198,31 @@ export interface PosTicket {
   resId?: string
   at: string
   by: string
+}
+
+export interface Season {
+  id: string
+  name: string
+  start: string
+  end: string
+  /** Fractional adjustment, e.g. 0.15 = +15%. */
+  adjust: number
+}
+
+/** Per room type, per date restrictions and overrides. */
+export interface DayRule {
+  price?: number
+  stopSell?: boolean
+  minStay?: number
+}
+
+export interface Promo {
+  code: string
+  percent: number
+  validUntil: string
+  uses: number
+  active: boolean
+  note?: string
 }
 
 export interface StockAlert {

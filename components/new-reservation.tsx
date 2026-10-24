@@ -6,8 +6,9 @@ import { findConflict, typeAvailability } from '@/lib/availability'
 import { RATE_PLANS, ROOM_TYPES, SOURCES } from '@/lib/config'
 import { fmtDate, nightsBetween, shift } from '@/lib/dates'
 import { naira, plural } from '@/lib/format'
-import { useLookups } from '@/lib/hooks'
-import { nightlyRate, stayQuote } from '@/lib/pricing'
+import { useCurrentUser, useLookups, useRateBook } from '@/lib/hooks'
+import { withTaxes } from '@/lib/pricing'
+import { quoteStay } from '@/lib/rates'
 import { toast, useHotel, type NewReservationInput } from '@/lib/store'
 import type { PayMethod, RatePlan, Reservation, RoomTypeId, Source } from '@/lib/types'
 import { Modal } from './modal'
@@ -83,8 +84,12 @@ function ReservationForm({
 
   const type = ROOM_TYPES.find((t) => t.id === typeId)!
   const nights = nightsBetween(checkIn, checkOut)
-  const rate = nightlyRate(type, ratePlan)
-  const quote = stayQuote(rate, Math.max(nights, 0))
+  const book = useRateBook()
+  const user = useCurrentUser()
+  const stay = quoteStay(book, typeId, checkIn, checkOut, ratePlan)
+  const rate = stay.average
+  const quote = withTaxes(stay.net)
+  const ratesVary = new Set(stay.nights.map((n) => n.planPrice)).size > 1
   const depositAmount = Number(deposit.replace(/[^\d]/g, '')) || 0
 
   const matches = useMemo(() => {
@@ -110,6 +115,14 @@ function ReservationForm({
     blocker = `Room ${selectedRoom!.number} is already booked for ${guestName(clash.guestId)} from ${fmtDate(clash.checkIn)} to ${fmtDate(clash.checkOut)}. Choose another room or change the dates.`
   else if (!selectedRoom && typeLeft < 1) blocker = `No ${type.name} rooms left for these dates.`
 
+  const chosenGuest = guestMode === 'existing' ? guests.find((g) => g.id === guestId) : undefined
+  if (!blocker && chosenGuest?.blacklist && user?.role !== 'manager')
+    blocker = `${chosenGuest.firstName} ${chosenGuest.lastName} is on the blacklist: ${chosenGuest.blacklist.reason}. Only a manager can accept this booking.`
+  const warnings: string[] = []
+  if (chosenGuest?.blacklist && user?.role === 'manager') warnings.push(`Blacklisted guest: ${chosenGuest.blacklist.reason}. Booking as a manager override, which is logged.`)
+  if (stay.closed.length) warnings.push(`${type.name} is closed to new bookings on ${stay.closed.map((d) => fmtDate(d)).join(', ')}. Staff can still book, but online channels can't.`)
+  if (stay.minStayViolated) warnings.push(`Minimum stay of ${stay.minStay} nights applies from ${fmtDate(checkIn)}. Online channels would refuse this booking.`)
+
   const guestValid = guestMode === 'existing' ? !!guestId : firstName.trim() && lastName.trim() && phone.trim()
   const canSave = !blocker && guestValid
 
@@ -129,6 +142,7 @@ function ReservationForm({
       children,
       source,
       ratePlan,
+      rate,
       eta: eta || undefined,
       notes: notes || undefined,
       payment: depositAmount > 0 ? { method, amount: depositAmount, ref: ref || undefined } : undefined,
@@ -210,6 +224,7 @@ function ReservationForm({
                           {g.firstName} {g.lastName}
                         </span>
                         {g.vip && <VipMark />}
+                        {g.blacklist && <span className="rounded bg-danger-soft px-1 text-[10.5px] font-semibold text-danger">BLACKLISTED</span>}
                         <span className="text-xs text-ink-3">{g.company ?? g.phone}</span>
                         <span className="ml-auto text-xs text-ink-3">{plural(g.stays, 'stay')}</span>
                         {guestId === g.id && <CircleCheck className="size-4 text-brand" />}
@@ -288,7 +303,7 @@ function ReservationForm({
                 >
                   {ROOM_TYPES.map((t) => (
                     <option key={t.id} value={t.id}>
-                      {t.name} · {naira(t.rate)}
+                      {t.name} · from {naira(book.baseRates[t.id])}
                     </option>
                   ))}
                 </Select>
@@ -329,6 +344,12 @@ function ReservationForm({
                 </div>
               )
             )}
+            {warnings.map((w) => (
+              <div key={w} className="mt-2 flex gap-2 rounded-md border border-warn/25 bg-warn-soft px-3 py-2 text-[12.5px] text-warn">
+                <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
+                {w}
+              </div>
+            ))}
           </section>
 
           {/* Details */}
@@ -360,10 +381,24 @@ function ReservationForm({
           <dl className="mt-3 space-y-1.5 text-[13px]">
             <div className="flex justify-between">
               <dt className="text-ink-2">
-                {naira(rate)} × {plural(Math.max(nights, 0), 'night')}
+                {ratesVary ? `${plural(Math.max(nights, 0), 'night')} · avg ${naira(rate)}` : `${naira(rate)} × ${plural(Math.max(nights, 0), 'night')}`}
               </dt>
               <dd className="num">{naira(quote.net)}</dd>
             </div>
+            {ratesVary && (
+              <ul className="space-y-0.5 border-l-2 border-line pl-2.5 text-xs text-ink-3">
+                {stay.nights.map((n) => (
+                  <li key={n.date} className="flex justify-between">
+                    <span>
+                      {fmtDate(n.date, 'EEE d MMM')}
+                      {n.season ? ` · ${n.season.name}` : n.weekend ? ' · weekend' : ''}
+                      {n.override ? ' · special rate' : ''}
+                    </span>
+                    <span className="num">{naira(n.planPrice)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
             <div className="flex justify-between">
               <dt className="text-ink-2">Service charge 10%</dt>
               <dd className="num">{naira(quote.service)}</dd>

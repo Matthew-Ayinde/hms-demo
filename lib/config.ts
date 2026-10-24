@@ -111,16 +111,48 @@ export const ROLE_HOME: Record<Role, string> = {
   restaurant: '/pos',
 }
 
+/** Default screen access per role. Editable at runtime in Settings → Roles & permissions. */
 export const ROUTE_ACCESS: Record<string, Role[]> = {
   '/dashboard': ['manager', 'frontdesk'],
-  '/reservations': ['manager', 'frontdesk'],
   '/front-desk': ['manager', 'frontdesk'],
   '/folio': ['manager', 'frontdesk'],
+  '/reservations': ['manager', 'frontdesk'],
+  '/guests': ['manager', 'frontdesk'],
   '/housekeeping': ['manager', 'frontdesk', 'housekeeping'],
   '/pos': ['manager', 'restaurant'],
   '/reports': ['manager'],
+  '/rates': ['manager'],
   '/audit': ['manager'],
+  '/settings': ['manager'],
+  '/inventory': ['manager'],
+  '/channels': ['manager'],
+  '/events': ['manager'],
 }
+
+export const SCREEN_LABELS: Record<string, string> = {
+  '/dashboard': 'Dashboard',
+  '/front-desk': 'Front desk',
+  '/folio': 'Guest bills (folios)',
+  '/reservations': 'Reservations calendar',
+  '/guests': 'Guest profiles',
+  '/housekeeping': 'Housekeeping',
+  '/pos': 'Restaurant & bar till',
+  '/reports': 'Reports',
+  '/rates': 'Rooms & rates',
+  '/audit': 'Audit log',
+  '/settings': 'Settings',
+  '/inventory': 'Inventory (Phase 2)',
+  '/channels': 'Channel manager (Phase 3)',
+  '/events': 'Events & banquets (Phase 3)',
+}
+
+export type HotelSettings = Pick<
+  typeof HOTEL,
+  'name' | 'shortName' | 'tagline' | 'address' | 'phone' | 'email' | 'website' | 'tin' | 'rcNumber' | 'checkInTime' | 'checkOutTime' | 'managerPin'
+>
+
+/** Pristine copy used to restore HOTEL when settings are reset. */
+export const HOTEL_DEFAULTS = structuredClone(HOTEL)
 
 export const MENU: MenuItem[] = [
   { id: 'm1', name: 'Jollof rice & grilled chicken', category: 'Mains', station: 'Kitchen', price: 6500 },

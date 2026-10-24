@@ -152,7 +152,7 @@ export default function DashboardPage() {
       <div className="mt-5 grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
         <Panel title="Arrivals today" actions={<Link href="/front-desk" className="text-xs font-medium text-brand hover:underline">Front desk</Link>}>
           <ul className="divide-y divide-line">
-            {lists.arrivals.map((r) => {
+            {[...lists.arrivals].sort((a, b) => (a.eta ?? '99').localeCompare(b.eta ?? '99')).map((r) => {
               const g = guest(r.guestId)
               const rm = room(r.roomId)
               return (

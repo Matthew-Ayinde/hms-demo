@@ -3,7 +3,7 @@
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { findConflict, typeAvailability } from './availability'
-import { HOTEL, ROOM_TYPES } from './config'
+import { HOTEL, HOTEL_DEFAULTS, ROOM_TYPES, SCREEN_LABELS, ROLE_LABEL, type HotelSettings } from './config'
 import { dateRange, fmtDate, nightsBetween, shift, todayISO } from './dates'
 import { naira } from './format'
 import { folioTotals, nightlyRate } from './pricing'
@@ -17,9 +17,12 @@ import type {
   Outlet,
   PayMethod,
   PosTicket,
+  Promo,
   RatePlan,
   Reservation,
+  Role,
   RoomTypeId,
+  Season,
   Source,
   TicketLine,
 } from './types'
@@ -33,7 +36,7 @@ export interface PaymentInput {
 }
 
 export interface NewReservationInput {
-  guest: { id?: string; firstName: string; lastName: string; phone: string; email: string; nationality?: string }
+  guest: { id?: string; firstName: string; lastName: string; phone: string; email: string; nationality?: string; marketing?: boolean }
   typeId: RoomTypeId
   roomId: string | null
   checkIn: string
@@ -47,6 +50,7 @@ export interface NewReservationInput {
   notes?: string
   payment?: PaymentInput
   extras?: { dept: Dept; desc: string; amount: number }[]
+  promoCode?: string
   createdBy?: string
 }
 
@@ -82,6 +86,24 @@ interface Actions {
   reportIssue: (roomId: string, issue: string, blocksRoom: boolean) => void
   returnToService: (roomId: string) => void
   runNightAudit: () => Result<{ posted: number }>
+  // Guests
+  updateGuest: (id: string, patch: Partial<Pick<Guest, 'firstName' | 'lastName' | 'phone' | 'email' | 'nationality' | 'company' | 'preferences' | 'notes' | 'marketing'>>) => void
+  setVip: (id: string, vip: boolean) => void
+  setBlacklist: (id: string, reason: string | null) => void
+  mergeGuests: (keepId: string, dropId: string) => void
+  anonymiseGuest: (id: string) => void
+  // Rates
+  setBaseRate: (typeId: RoomTypeId, rate: number) => void
+  setDayRules: (typeIds: RoomTypeId[], dates: string[], rule: { price?: number | null; adjustPct?: number; stopSell?: boolean; minStay?: number }) => void
+  setWeekendUplift: (value: number) => void
+  addSeason: (season: Omit<Season, 'id'>) => void
+  removeSeason: (id: string) => void
+  addPromo: (promo: Omit<Promo, 'uses'>) => Result
+  togglePromo: (code: string) => void
+  // Settings
+  updateSettings: (patch: Partial<HotelSettings>) => void
+  setPermission: (route: string, role: Role, allowed: boolean) => void
+  setVoidApproval: (required: boolean) => void
 }
 
 export type HotelState = HotelData & Actions
@@ -99,9 +121,24 @@ const EMPTY: HotelData = {
   history: [],
   tickets: [],
   counters: { reservation: 0, check: 0, invoice: 0, id: 0 },
+  baseRates: { STD: 0, DLX: 0, EXS: 0 },
+  weekendUplift: 0,
+  seasons: [],
+  dayRules: {},
+  promos: [],
+  settings: {},
+  permissions: {},
+  voidNeedsApproval: true,
 }
 
 const DATA_KEYS = Object.keys(EMPTY) as (keyof HotelData)[]
+
+export const STORAGE_KEY = 'hms-demo-data-v2'
+
+/** Applies saved property settings onto the shared HOTEL object every screen reads from. */
+function applySettings(settings: Partial<HotelSettings>) {
+  Object.assign(HOTEL, structuredClone(HOTEL_DEFAULTS), settings)
+}
 
 const nowIso = () => new Date().toISOString()
 
@@ -184,6 +221,7 @@ export const useHotel = create<HotelState>()(
 
         reset: () => {
           set({ ...buildSeed(todayISO()) })
+          applySettings({})
         },
 
         ensureFresh: () => {
@@ -216,6 +254,7 @@ export const useHotel = create<HotelState>()(
               nationality: input.guest.nationality ?? 'Nigerian',
               stays: 0,
               preferences: [],
+              marketing: input.guest.marketing,
             }
             guestId = guest.id
             set((s) => ({ guests: [...s.guests, guest] }))
@@ -246,6 +285,7 @@ export const useHotel = create<HotelState>()(
           set((s) => ({
             reservations: [...s.reservations, reservation],
             counters: { ...s.counters, reservation: s.counters.reservation + 1 },
+            promos: input.promoCode ? s.promos.map((p) => (p.code === input.promoCode ? { ...p, uses: p.uses + 1 } : p)) : s.promos,
           }))
           log(
             'Reservations',
@@ -496,17 +536,176 @@ export const useHotel = create<HotelState>()(
           )
           return { ok: true, posted: inHouse.length }
         },
+
+        /* ---------- Guests ---------- */
+
+        updateGuest: (guestId, patch) => {
+          set((s) => ({ guests: s.guests.map((g) => (g.id === guestId ? { ...g, ...patch } : g)) }))
+          const fields = Object.keys(patch).join(', ')
+          log('Guests', 'Profile updated', `${guestName(guestId)} · ${fields}`)
+        },
+
+        setVip: (guestId, vip) => {
+          set((s) => ({ guests: s.guests.map((g) => (g.id === guestId ? { ...g, vip } : g)) }))
+          log('Guests', vip ? 'Marked VIP' : 'VIP removed', guestName(guestId))
+        },
+
+        setBlacklist: (guestId, reason) => {
+          set((s) => ({
+            guests: s.guests.map((g) =>
+              g.id === guestId ? { ...g, blacklist: reason ? { reason, at: nowIso(), by: actor() } : undefined } : g,
+            ),
+          }))
+          log('Guests', reason ? 'Guest blacklisted' : 'Blacklist removed', `${guestName(guestId)}${reason ? ` · ${reason}` : ''}`)
+        },
+
+        mergeGuests: (keepId, dropId) => {
+          const keep = get().guests.find((g) => g.id === keepId)
+          const drop = get().guests.find((g) => g.id === dropId)
+          if (!keep || !drop) return
+          const moved = get().reservations.filter((r) => r.guestId === dropId).length
+          set((s) => ({
+            reservations: s.reservations.map((r) => (r.guestId === dropId ? { ...r, guestId: keepId } : r)),
+            guests: s.guests
+              .filter((g) => g.id !== dropId)
+              .map((g) =>
+                g.id === keepId
+                  ? {
+                      ...g,
+                      stays: g.stays + drop.stays,
+                      preferences: Array.from(new Set([...g.preferences, ...drop.preferences])),
+                      vip: g.vip || drop.vip,
+                      company: g.company ?? drop.company,
+                      idType: g.idType ?? drop.idType,
+                      idNumber: g.idNumber ?? drop.idNumber,
+                      notes: [g.notes, drop.notes, `Merged with duplicate profile (${drop.email}).`].filter(Boolean).join('\n'),
+                    }
+                  : g,
+              ),
+          }))
+          log('Guests', 'Profiles merged', `${drop.firstName} ${drop.lastName} (${drop.email}) merged into ${keep.firstName} ${keep.lastName} · ${moved} ${moved === 1 ? 'booking' : 'bookings'} moved`)
+        },
+
+        anonymiseGuest: (guestId) => {
+          const name = guestName(guestId)
+          set((s) => ({
+            guests: s.guests.map((g) =>
+              g.id === guestId
+                ? { ...g, firstName: 'Deleted', lastName: `guest ${g.id.toUpperCase()}`, phone: '—', email: '—', idType: undefined, idNumber: undefined, preferences: [], notes: undefined, marketing: false, vip: false, anonymised: true }
+                : g,
+            ),
+          }))
+          log('Guests', 'Personal data erased', `${name}: contact details, ID and preferences removed on request (NDPA). Financial records kept for tax.`)
+        },
+
+        /* ---------- Rates ---------- */
+
+        setBaseRate: (typeId, rate) => {
+          const before = get().baseRates[typeId]
+          set((s) => ({ baseRates: { ...s.baseRates, [typeId]: Math.round(rate) } }))
+          log('Rates', 'Base rate changed', `${ROOM_TYPES.find((t) => t.id === typeId)!.name}: ${naira(before)} → ${naira(rate)}`)
+        },
+
+        setDayRules: (typeIds, dates, rule) => {
+          set((s) => {
+            const dayRules = { ...s.dayRules }
+            for (const typeId of typeIds)
+              for (const date of dates) {
+                const key = `${typeId}|${date}`
+                const next = { ...dayRules[key] }
+                if (rule.price === null) delete next.price
+                else if (rule.price !== undefined) next.price = Math.round(rule.price)
+                if (rule.adjustPct !== undefined) {
+                  const base = next.price ?? s.baseRates[typeId]
+                  next.price = Math.round((base * (1 + rule.adjustPct / 100)) / 500) * 500
+                }
+                if (rule.stopSell !== undefined) next.stopSell = rule.stopSell || undefined
+                if (rule.minStay !== undefined) next.minStay = rule.minStay > 1 ? rule.minStay : undefined
+                const empty = next.price === undefined && !next.stopSell && !next.minStay
+                if (empty) delete dayRules[key]
+                else dayRules[key] = next
+              }
+            return { dayRules }
+          })
+          const parts: string[] = []
+          if (rule.price === null) parts.push('price reset to standard')
+          else if (rule.price !== undefined) parts.push(`price ${naira(rule.price)}`)
+          if (rule.adjustPct !== undefined) parts.push(`price ${rule.adjustPct > 0 ? '+' : ''}${rule.adjustPct}%`)
+          if (rule.stopSell !== undefined) parts.push(rule.stopSell ? 'closed to new bookings' : 'reopened for sale')
+          if (rule.minStay !== undefined) parts.push(`minimum stay ${rule.minStay}`)
+          const span = dates.length === 1 ? fmtDate(dates[0]) : `${fmtDate(dates[0])} – ${fmtDate(dates[dates.length - 1])}`
+          log('Rates', 'Rates updated', `${typeIds.join(', ')} · ${span} · ${parts.join(', ')}`)
+        },
+
+        setWeekendUplift: (value) => {
+          set({ weekendUplift: value })
+          log('Rates', 'Weekend pricing', `Friday and Saturday uplift set to ${Math.round(value * 100)}%`)
+        },
+
+        addSeason: (season) => {
+          set((s) => ({ seasons: [...s.seasons, { ...season, id: `se${s.counters.id + 1}` }], counters: { ...s.counters, id: s.counters.id + 1 } }))
+          log('Rates', 'Season added', `${season.name} · ${fmtDate(season.start)} – ${fmtDate(season.end)} · ${season.adjust > 0 ? '+' : ''}${Math.round(season.adjust * 100)}%`)
+        },
+
+        removeSeason: (seasonId) => {
+          const season = get().seasons.find((s) => s.id === seasonId)
+          set((s) => ({ seasons: s.seasons.filter((x) => x.id !== seasonId) }))
+          if (season) log('Rates', 'Season removed', season.name)
+        },
+
+        addPromo: (promo) => {
+          const code = promo.code.trim().toUpperCase()
+          if (!/^[A-Z0-9]{4,16}$/.test(code)) return { ok: false, error: 'Use 4–16 letters or numbers, no spaces.' }
+          if (get().promos.some((p) => p.code === code)) return { ok: false, error: `${code} already exists.` }
+          set((s) => ({ promos: [{ ...promo, code, uses: 0 }, ...s.promos] }))
+          log('Rates', 'Promo code created', `${code} · ${promo.percent}% off room rate · valid until ${fmtDate(promo.validUntil, 'd MMM yyyy')}`)
+          return { ok: true }
+        },
+
+        togglePromo: (code) => {
+          const promo = get().promos.find((p) => p.code === code)
+          set((s) => ({ promos: s.promos.map((p) => (p.code === code ? { ...p, active: !p.active } : p)) }))
+          if (promo) log('Rates', promo.active ? 'Promo paused' : 'Promo activated', code)
+        },
+
+        /* ---------- Settings ---------- */
+
+        updateSettings: (patch) => {
+          const settings = { ...get().settings, ...patch }
+          set({ settings })
+          applySettings(settings)
+          log('Settings', 'Property settings saved', Object.keys(patch).filter((k) => k !== 'managerPin').join(', ') + (patch.managerPin ? ' · manager PIN changed' : ''))
+        },
+
+        setPermission: (route, role, allowed) => {
+          set((s) => {
+            const current = s.permissions[route] ?? []
+            const next = allowed ? Array.from(new Set([...current, role])) : current.filter((r) => r !== role)
+            return { permissions: { ...s.permissions, [route]: next } }
+          })
+          log('Settings', allowed ? 'Access granted' : 'Access removed', `${ROLE_LABEL[role]} · ${SCREEN_LABELS[route] ?? route}`)
+        },
+
+        setVoidApproval: (required) => {
+          set({ voidNeedsApproval: required })
+          log('Settings', 'Approval rule changed', required ? 'Voids now need a manager PIN' : 'Front desk can void charges without approval')
+        },
       }
     },
     {
-      name: 'hms-demo-data',
-      version: 1,
+      name: STORAGE_KEY,
+      version: 2,
       storage: createJSONStorage(() => localStorage),
       skipHydration: true,
       partialize: (s) => Object.fromEntries(DATA_KEYS.map((k) => [k, s[k]])) as unknown as HotelData,
     },
   ),
 )
+
+// Keep the shared HOTEL object in step with saved settings, including after rehydration and cross-tab sync.
+useHotel.subscribe((s, prev) => {
+  if (s.settings !== prev.settings) applySettings(s.settings)
+})
 
 /* ---------- Toasts (not persisted) ---------- */
 

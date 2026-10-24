@@ -6,7 +6,6 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
-  LabelList,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -139,26 +138,23 @@ export function TrendChart({
   )
 }
 
-/** Horizontal single-series bars with the value at the tip. */
+/** Horizontal single-series bars with the value at the tip. Plain HTML so labels never clip. */
 export function RankedBars({ data, color = SERIES[0], format = naira }: { data: { label: string; value: number }[]; color?: string; format?: (v: number) => string }) {
   const total = data.reduce((s, d) => s + d.value, 0)
+  const max = Math.max(...data.map((d) => d.value))
   return (
-    <ResponsiveContainer width="100%" height={data.length * 40 + 8}>
-      <BarChart data={data} layout="vertical" margin={{ top: 0, right: 92, bottom: 0, left: 0 }} barCategoryGap="30%">
-        <XAxis type="number" hide />
-        <YAxis type="category" dataKey="label" tick={{ fontSize: 12, fill: '#55524a' }} tickLine={false} axisLine={false} width={104} />
-        <Tooltip
-          cursor={{ fill: 'rgba(30,74,65,0.05)' }}
-          content={(p: TooltipContentProps<ValueType, NameType>) => {
-            if (!p.active || !p.payload?.length) return null
-            const d = p.payload[0].payload as { label: string; value: number }
-            return <TooltipCard title={d.label} rows={[{ label: 'Revenue', value: format(d.value), color }, { label: 'Share', value: `${((d.value / total) * 100).toFixed(1)}%` }]} />
-          }}
-        />
-        <Bar dataKey="value" fill={color} radius={[0, 4, 4, 0]} maxBarSize={18}>
-          <LabelList dataKey="value" position="right" formatter={(v) => `${format(Number(v))}  ·  ${((Number(v) / total) * 100).toFixed(0)}%`} style={{ fontSize: 11.5, fill: '#55524a' }} />
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
+    <ul className="space-y-3">
+      {data.map((d) => (
+        <li key={d.label} className="group grid grid-cols-[112px_minmax(0,1fr)] items-center gap-3" title={`${d.label}: ${naira(d.value)} (${((d.value / total) * 100).toFixed(1)}%)`}>
+          <span className="truncate text-[12.5px] text-ink-2">{d.label}</span>
+          <span className="flex items-center gap-2">
+            <span className="h-4 rounded-r-[4px] transition-opacity group-hover:opacity-80" style={{ width: `calc((100% - 132px) * ${d.value / max})`, background: color }} />
+            <span className="num shrink-0 text-xs whitespace-nowrap text-ink-2">
+              {format(d.value)} <span className="text-ink-3">· {((d.value / total) * 100).toFixed(0)}%</span>
+            </span>
+          </span>
+        </li>
+      ))}
+    </ul>
   )
 }

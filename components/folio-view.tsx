@@ -138,7 +138,7 @@ function Folio({ resId }: { resId: string }) {
                         )}
                       </div>
                     </Td>
-                    <Td className="text-xs text-ink-2">{actorName(row.charge.by)}</Td>
+                    <Td className="text-xs whitespace-nowrap text-ink-2">{actorName(row.charge.by)}</Td>
                     <Td align="right" className={cn(row.charge.void && 'line-through')}>
                       {naira(row.charge.amount)}
                     </Td>
@@ -162,7 +162,7 @@ function Folio({ resId }: { resId: string }) {
                       <div>Payment · {row.payment.method}</div>
                       {row.payment.ref && <div className="text-xs text-ink-3">Ref. {row.payment.ref}</div>}
                     </Td>
-                    <Td className="text-xs text-ink-2">{actorName(row.payment.by)}</Td>
+                    <Td className="text-xs whitespace-nowrap text-ink-2">{actorName(row.payment.by)}</Td>
                     <Td align="right" />
                     <Td align="right" className="text-ok">
                       {naira(row.payment.amount)}
@@ -427,14 +427,16 @@ function VoidForm({ charge, onClose }: { charge: Charge; onClose: () => void }) 
   const [reason, setReason] = useState(VOID_REASONS[0])
   const [pin, setPin] = useState('')
   const [error, setError] = useState('')
+  const needsApproval = useHotel((s) => s.voidNeedsApproval)
   const isManager = user.role === 'manager'
+  const selfApproved = isManager || !needsApproval
 
   const submit = () => {
-    if (!isManager && pin !== HOTEL.managerPin) {
+    if (!selfApproved && pin !== HOTEL.managerPin) {
       setError('Incorrect manager PIN. The charge was not voided.')
       return
     }
-    voidCharge(charge.id, reason, isManager ? user.id : 'u-gm')
+    voidCharge(charge.id, reason, selfApproved ? user.id : 'u-gm')
     toast.success('Charge voided', `${charge.desc} · ${naira(charge.amount)}`)
     onClose()
   }
@@ -450,7 +452,7 @@ function VoidForm({ charge, onClose }: { charge: Charge; onClose: () => void }) 
         <>
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="danger" onClick={submit}>
-            {isManager ? 'Void charge' : 'Approve and void'}
+            {selfApproved ? 'Void charge' : 'Approve and void'}
           </Button>
         </>
       }
@@ -463,8 +465,10 @@ function VoidForm({ charge, onClose }: { charge: Charge; onClose: () => void }) 
             ))}
           </Select>
         </Field>
-        {isManager ? (
-          <p className="text-xs text-ink-3">You are signed in as a manager, so no second approval is needed. The void is recorded in the audit log under your name.</p>
+        {selfApproved ? (
+          <p className="text-xs text-ink-3">
+            {isManager ? 'You are signed in as a manager, so no second approval is needed.' : 'Manager approval for voids is switched off in Settings.'} The void is recorded in the audit log under your name.
+          </p>
         ) : (
           <div className="rounded-md border border-line bg-sunken p-3">
             <p className="mb-2 text-[12.5px] text-ink-2">Voids need a manager&apos;s approval. Ask the duty manager to enter their PIN.</p>

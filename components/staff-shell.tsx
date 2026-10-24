@@ -9,30 +9,39 @@ import {
   LayoutGrid,
   LogOut,
   Menu,
+  Network,
+  Package,
+  PartyPopper,
   RotateCcw,
   ScrollText,
+  Settings,
   ShieldAlert,
+  Tags,
+  Users,
   UtensilsCrossed,
   X,
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { HOTEL, ROLE_HOME, ROLE_LABEL, ROUTE_ACCESS } from '@/lib/config'
+import { HOTEL, ROLE_HOME, ROLE_LABEL } from '@/lib/config'
 import { fmtDate } from '@/lib/dates'
-import { useCurrentUser } from '@/lib/hooks'
+import { useCanAccess, useCurrentUser } from '@/lib/hooks'
 import { toast, useHotel, useSession } from '@/lib/store'
 import type { Role } from '@/lib/types'
 import { Modal } from './modal'
 import { Avatar, Badge, Button, cn } from './ui'
 
-const NAV: { group: string; items: { href: string; label: string; icon: typeof LayoutGrid }[] }[] = [
+type NavItem = { href: string; label: string; icon: typeof LayoutGrid; phase?: 2 | 3 }
+
+const NAV: { group: string; items: NavItem[] }[] = [
   {
     group: 'Operations',
     items: [
       { href: '/dashboard', label: 'Dashboard', icon: LayoutGrid },
       { href: '/front-desk', label: 'Front desk', icon: ConciergeBell },
       { href: '/reservations', label: 'Reservations', icon: CalendarRange },
+      { href: '/guests', label: 'Guests', icon: Users },
       { href: '/housekeeping', label: 'Housekeeping', icon: BedDouble },
       { href: '/pos', label: 'Restaurant & bar', icon: UtensilsCrossed },
     ],
@@ -41,20 +50,26 @@ const NAV: { group: string; items: { href: string; label: string; icon: typeof L
     group: 'Management',
     items: [
       { href: '/reports', label: 'Reports', icon: BarChart3 },
+      { href: '/rates', label: 'Rooms & rates', icon: Tags },
       { href: '/audit', label: 'Audit log', icon: ScrollText },
+      { href: '/settings', label: 'Settings', icon: Settings },
+    ],
+  },
+  {
+    group: 'Later phases',
+    items: [
+      { href: '/inventory', label: 'Inventory', icon: Package, phase: 2 },
+      { href: '/channels', label: 'Channel manager', icon: Network, phase: 3 },
+      { href: '/events', label: 'Events & banquets', icon: PartyPopper, phase: 3 },
     ],
   },
 ]
-
-const canAccess = (role: Role, path: string) => {
-  const key = Object.keys(ROUTE_ACCESS).find((prefix) => path === prefix || path.startsWith(`${prefix}/`))
-  return key ? ROUTE_ACCESS[key].includes(role) : true
-}
 
 export function StaffShell({ children }: { children: React.ReactNode }) {
   const user = useCurrentUser()
   const router = useRouter()
   const pathname = usePathname()
+  const canAccess = useCanAccess()
   const [mobileOpen, setMobileOpen] = useState(false)
 
   useEffect(() => {
@@ -113,6 +128,9 @@ function Sidebar({ role }: { role: Role }) {
   const user = useCurrentUser()!
   const logout = useSession((s) => s.logout)
   const reset = useHotel((s) => s.reset)
+  const canAccess = useCanAccess()
+  // Re-render when the property name changes in Settings.
+  useHotel((s) => s.settings)
   const [confirmReset, setConfirmReset] = useState(false)
 
   return (
@@ -148,6 +166,7 @@ function Sidebar({ role }: { role: Role }) {
                       >
                         <item.icon className="size-4" strokeWidth={active ? 2.2 : 1.8} />
                         {item.label}
+                        {item.phase && <span className="ml-auto rounded bg-[#efede8] px-1 text-[10px] font-semibold text-ink-3">P{item.phase}</span>}
                       </Link>
                     </li>
                   )
@@ -236,7 +255,10 @@ function Topbar({ onMenu }: { onMenu: () => void }) {
         <Menu className="size-5" />
       </button>
       <div className="flex min-w-0 items-baseline gap-2 text-[13px]">
-        <span className="font-medium text-ink">{fmtDate(businessDate, 'EEEE d MMMM yyyy')}</span>
+        <span className="font-medium text-ink">
+          <span className="sm:hidden">{fmtDate(businessDate, 'EEE d MMM')}</span>
+          <span className="hidden sm:inline">{fmtDate(businessDate, 'EEEE d MMMM yyyy')}</span>
+        </span>
         <span className="num hidden text-ink-3 sm:inline">
           {now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
         </span>

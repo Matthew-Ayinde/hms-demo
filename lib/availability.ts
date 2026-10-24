@@ -63,7 +63,7 @@ export function typeAvailability(
   )
 }
 
-/** Rooms occupied on a given night (any type). */
+/** Rooms occupied on a given night (any type), including stays that have since checked out. */
 export function occupiedOn(reservations: Reservation[], night: string) {
-  return reservations.filter((r) => HOLDS_ROOM.includes(r.status) && r.checkIn <= night && r.checkOut > night).length
+  return reservations.filter((r) => r.status !== 'cancelled' && r.checkIn <= night && r.checkOut > night).length
 }

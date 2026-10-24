@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { HOTEL } from '@/lib/config'
-import { useHotel, useSession } from '@/lib/store'
+import { STORAGE_KEY, useHotel, useSession } from '@/lib/store'
 
 /**
  * All demo data lives in the browser, so nothing date- or storage-dependent
@@ -22,7 +22,7 @@ export function StoreGate({ children }: { children: React.ReactNode }) {
     })()
 
     const onStorage = (e: StorageEvent) => {
-      if (e.key === 'hms-demo-data') useHotel.persist.rehydrate()
+      if (e.key === STORAGE_KEY) useHotel.persist.rehydrate()
     }
     window.addEventListener('storage', onStorage)
     return () => {

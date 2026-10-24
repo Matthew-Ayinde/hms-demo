@@ -9,7 +9,9 @@ import { typeAvailability } from '@/lib/availability'
 import { HOTEL, ROOM_TYPES } from '@/lib/config'
 import { fmtDate, nightsBetween, shift } from '@/lib/dates'
 import { naira, plural } from '@/lib/format'
-import { nightlyRate, withTaxes } from '@/lib/pricing'
+import { useRateBook } from '@/lib/hooks'
+import { withTaxes } from '@/lib/pricing'
+import { promoValid, quoteStay } from '@/lib/rates'
 import { useHotel } from '@/lib/store'
 import type { RatePlan, Reservation, RoomType } from '@/lib/types'
 
@@ -50,9 +52,29 @@ export default function BookingPage() {
     [rooms, reservations, checkIn, checkOut, nights],
   )
 
-  const rate = selection ? nightlyRate(selection.type, selection.plan) : 0
+  const book = useRateBook()
+  const promos = useHotel((s) => s.promos)
+  const [promoInput, setPromoInput] = useState('')
+  const [promoCode, setPromoCode] = useState<string | null>(null)
+  const [promoError, setPromoError] = useState('')
+  const promo = promos.find((p) => p.code === promoCode)
+  const stay = selection ? quoteStay(book, selection.type.id, checkIn, checkOut, selection.plan, promo) : null
+  const rate = stay?.average ?? 0
+  const ratesVary = !!stay && new Set(stay.nights.map((n) => n.planPrice)).size > 1
+
+  const applyPromo = () => {
+    const code = promoInput.trim().toUpperCase()
+    const found = promos.find((p) => p.code === code)
+    if (!promoValid(found, today)) {
+      setPromoCode(null)
+      setPromoError(found ? 'This code has expired.' : "We don't recognise that code.")
+      return
+    }
+    setPromoCode(code)
+    setPromoError('')
+  }
   const extrasNet = EXTRAS.filter((e) => extras.includes(e.id)).reduce((s, e) => s + e.amount, 0)
-  const totals = withTaxes(rate * nights + extrasNet)
+  const totals = withTaxes((stay?.net ?? 0) + extrasNet)
   const depositAmount = withTaxes(rate + extrasNet).total
   const dueNow = payMode === 'full' ? totals.total : depositAmount
 
@@ -70,7 +92,7 @@ export default function BookingPage() {
     await new Promise((r) => setTimeout(r, 1600))
     const ref = `PSK-T${Math.floor(10_000_000 + Math.random() * 89_999_999)}`
     const result = createReservation({
-      guest: { firstName: form.firstName, lastName: form.lastName, email: form.email, phone: form.phone },
+      guest: { firstName: form.firstName, lastName: form.lastName, email: form.email, phone: form.phone, marketing: form.marketing },
       typeId: selection.type.id,
       roomId: null,
       checkIn,
@@ -79,8 +101,10 @@ export default function BookingPage() {
       children: 0,
       source: 'Website',
       ratePlan: selection.plan,
+      rate,
+      promoCode: promo?.code,
       eta: form.arrival,
-      notes: form.requests || undefined,
+      notes: [form.requests, promo && `Promo ${promo.code} (−${promo.percent}%)`].filter(Boolean).join(' · ') || undefined,
       extras: EXTRAS.filter((e) => extras.includes(e.id)).map((e) => ({ dept: e.dept, desc: e.label, amount: e.amount })),
       payment: { method: 'Paystack', amount: dueNow, ref },
       createdBy: 'web',
@@ -174,7 +198,7 @@ export default function BookingPage() {
       <main className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
         {step === 'rooms' && (
           <div className="space-y-4">
-            <div className="flex items-baseline justify-between">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
               <h2 className="font-serif text-2xl">Choose your room</h2>
               <span className="text-[13px] text-ink-3">
                 {fmtDate(checkIn, 'EEE d MMM')} – {fmtDate(checkOut, 'EEE d MMM')} · prices per night, before tax
@@ -183,7 +207,9 @@ export default function BookingPage() {
             {ROOM_TYPES.map((type) => {
               const left = availability[type.id]
               const fits = type.capacity >= adults
-              const soldOut = left < 1 || !fits
+              const rules = quoteStay(book, type.id, checkIn, checkOut, 'Room only')
+              const restricted = rules.closed.length > 0 || rules.minStayViolated
+              const soldOut = left < 1 || !fits || restricted
               return (
                 <article key={type.id} className={cn('grid overflow-hidden rounded-xl border border-[#e8e2d6] bg-white md:grid-cols-[300px_minmax(0,1fr)]', soldOut && 'opacity-60')}>
                   <div className="aspect-[16/10] bg-sunken md:aspect-auto md:h-full">
@@ -203,23 +229,33 @@ export default function BookingPage() {
                       {!soldOut && left <= 2 && <span className="rounded bg-[#fbeee9] px-2 py-0.5 text-xs font-medium text-[#a2391b]">Only {left} left</span>}
                       {left < 1 && <span className="rounded bg-sunken px-2 py-0.5 text-xs font-medium text-ink-3">Sold out for these dates</span>}
                       {left >= 1 && !fits && <span className="rounded bg-sunken px-2 py-0.5 text-xs font-medium text-ink-3">Not suitable for {adults} guests</span>}
+                      {left >= 1 && fits && rules.closed.length > 0 && (
+                        <span className="rounded bg-sunken px-2 py-0.5 text-xs font-medium text-ink-3">Not available on {rules.closed.map((d) => fmtDate(d)).join(', ')}</span>
+                      )}
+                      {left >= 1 && fits && !rules.closed.length && rules.minStayViolated && (
+                        <span className="rounded bg-sunken px-2 py-0.5 text-xs font-medium text-ink-3">Minimum {rules.minStay} nights from {fmtDate(checkIn)}</span>
+                      )}
                     </div>
                     <p className="mt-3 text-[13.5px] leading-relaxed text-ink-2">{type.description}</p>
                     <p className="mt-2 text-xs text-ink-3">{type.amenities.join(' · ')}</p>
                     <div className="mt-4 divide-y divide-[#efeae0] border-t border-[#efeae0]">
                       {(['Room only', 'Bed & breakfast'] as RatePlan[]).map((plan) => {
-                        const r = nightlyRate(type, plan)
+                        const q = quoteStay(book, type.id, checkIn, checkOut, plan)
+                        const varies = new Set(q.nights.map((n) => n.planPrice)).size > 1
                         return (
-                          <div key={plan} className="flex flex-wrap items-center gap-3 py-3">
-                            <div className="min-w-0 flex-1">
+                          <div key={plan} className="flex flex-wrap items-center gap-x-3 gap-y-2 py-3">
+                            <div className="min-w-0 basis-full sm:basis-0 sm:flex-1">
                               <div className="text-[13.5px] font-medium">{plan}</div>
                               <div className="text-xs text-ink-3">
                                 {plan === 'Bed & breakfast' ? 'Buffet breakfast for two · ' : ''}Free cancellation until 48 hours before arrival
                               </div>
                             </div>
-                            <div className="text-right">
-                              <div className="num text-[17px] font-semibold">{naira(r)}</div>
-                              <div className="num text-[11.5px] text-ink-3">{nights ? `${naira(withTaxes(r * nights).total)} total incl. taxes` : ''}</div>
+                            <div className="ml-auto text-right sm:ml-0">
+                              <div className="num text-[17px] font-semibold">
+                                {varies && <span className="mr-1 text-[11.5px] font-normal text-ink-3">avg</span>}
+                                {naira(q.average || book.baseRates[type.id])}
+                              </div>
+                              <div className="num text-[11.5px] text-ink-3">{nights ? `${naira(withTaxes(q.net).total)} total incl. taxes` : ''}</div>
                             </div>
                             <Button
                               variant="primary"
@@ -299,6 +335,18 @@ export default function BookingPage() {
                         </label>
                       ))}
                     </div>
+                  </section>
+
+                  <section className="rounded-xl border border-[#e8e2d6] bg-white p-5">
+                    <h2 className="font-serif text-xl">Promo code</h2>
+                    <div className="mt-3 flex max-w-sm gap-2">
+                      <Input value={promoInput} onChange={(e) => setPromoInput(e.target.value)} placeholder="e.g. DIRECT10" className="uppercase" />
+                      <Button onClick={applyPromo} disabled={!promoInput.trim()}>
+                        Apply
+                      </Button>
+                    </div>
+                    {promoError && <p className="mt-1.5 text-xs text-danger">{promoError}</p>}
+                    {promo && <p className="mt-1.5 text-xs text-ok">{promo.code} applied: {promo.percent}% off the room rate.</p>}
                   </section>
 
                   <label className="flex items-start gap-2 text-[12.5px] text-ink-2">
@@ -409,10 +457,28 @@ export default function BookingPage() {
                 <dl className="mt-3 space-y-1.5 text-[13px]">
                   <div className="flex justify-between">
                     <dt className="text-ink-2">
-                      {naira(rate)} × {plural(nights, 'night')}
+                      {ratesVary ? `Room, ${plural(nights, 'night')}` : `${naira(stay?.nights[0]?.planPrice ?? 0)} × ${plural(nights, 'night')}`}
                     </dt>
-                    <dd className="num">{naira(rate * nights)}</dd>
+                    <dd className="num">{naira(stay?.gross ?? 0)}</dd>
                   </div>
+                  {ratesVary && (
+                    <ul className="space-y-0.5 border-l-2 border-line pl-2.5 text-xs text-ink-3">
+                      {stay!.nights.map((n) => (
+                        <li key={n.date} className="flex justify-between">
+                          <span>{fmtDate(n.date, 'EEE d MMM')}</span>
+                          <span className="num">{naira(n.planPrice)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {promo && stay && (
+                    <div className="flex justify-between text-ok">
+                      <dt>
+                        {promo.code} · {promo.percent}% off
+                      </dt>
+                      <dd className="num">{naira(-stay.discount)}</dd>
+                    </div>
+                  )}
                   {EXTRAS.filter((e) => extras.includes(e.id)).map((e) => (
                     <div key={e.id} className="flex justify-between">
                       <dt className="text-ink-2">{e.label}</dt>

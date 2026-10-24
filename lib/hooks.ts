@@ -4,7 +4,8 @@ import { useMemo } from 'react'
 import { ROOM_TYPES, USERS } from './config'
 import { folioTotals } from './pricing'
 import { pendingNights, useHotel, useSession } from './store'
-import type { Guest, Reservation, Room, RoomType } from './types'
+import type { RateBook } from './rates'
+import type { Guest, Reservation, Role, Room, RoomType } from './types'
 
 export function useCurrentUser() {
   const userId = useSession((s) => s.userId)
@@ -95,4 +96,26 @@ export function usePendingRoomCharge(res: Reservation | undefined) {
   if (!res || res.status !== 'checked_in') return { nights: [] as string[], amount: 0 }
   const nights = pendingNights(res, today)
   return { nights, amount: nights.length * res.rate }
+}
+
+/** The live rate book: base rates, weekend uplift, seasons and per-day rules. */
+export function useRateBook(): RateBook {
+  const baseRates = useHotel((s) => s.baseRates)
+  const weekendUplift = useHotel((s) => s.weekendUplift)
+  const seasons = useHotel((s) => s.seasons)
+  const dayRules = useHotel((s) => s.dayRules)
+  return useMemo(() => ({ baseRates, weekendUplift, seasons, dayRules }), [baseRates, weekendUplift, seasons, dayRules])
+}
+
+/** Screen access per role, as configured in Settings. Managers always have full access. */
+export function useCanAccess() {
+  const permissions = useHotel((s) => s.permissions)
+  return useMemo(
+    () => (role: Role, path: string) => {
+      if (role === 'manager') return true
+      const key = Object.keys(permissions).find((prefix) => path === prefix || path.startsWith(`${prefix}/`))
+      return key ? permissions[key].includes(role) : true
+    },
+    [permissions],
+  )
 }

@@ -121,22 +121,25 @@ export function PageHeader({ title, description, actions }: { title: string; des
 /* ---------- Form controls ---------- */
 
 const controlBase =
-  'w-full rounded-md border border-line-strong bg-surface px-2.5 text-[13px] text-ink placeholder:text-ink-3 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15 disabled:bg-sunken disabled:text-ink-3'
+  'rounded-md border border-line-strong bg-surface px-2.5 text-[13px] text-ink placeholder:text-ink-3 focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15 disabled:bg-sunken disabled:text-ink-3'
+
+/** Full width unless the caller sets its own width (clsx doesn't resolve class conflicts). */
+const control = (className?: string) => cn(controlBase, !/(^|\s)w-/.test(className ?? '') && 'w-full', className)
 
 export const Input = forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(function Input({ className, ...props }, ref) {
-  return <input ref={ref} className={cn(controlBase, 'h-8.5', className)} {...props} />
+  return <input ref={ref} className={cn(control(className), !/(^|\s)h-/.test(className ?? '') && 'h-8.5')} {...props} />
 })
 
 export const Select = forwardRef<HTMLSelectElement, React.SelectHTMLAttributes<HTMLSelectElement>>(function Select({ className, children, ...props }, ref) {
   return (
-    <select ref={ref} className={cn(controlBase, 'h-8.5 pr-7', className)} {...props}>
+    <select ref={ref} className={cn(control(className), 'h-8.5 pr-7')} {...props}>
       {children}
     </select>
   )
 })
 
 export const Textarea = forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(function Textarea({ className, ...props }, ref) {
-  return <textarea ref={ref} className={cn(controlBase, 'py-2', className)} {...props} />
+  return <textarea ref={ref} className={cn(control(className), 'py-2')} {...props} />
 })
 
 export function Field({ label, hint, error, children, className }: { label: string; hint?: React.ReactNode; error?: string; children: React.ReactNode; className?: string }) {
@@ -244,7 +247,7 @@ export function Table({ children, className }: { children: React.ReactNode; clas
 
 export function Th({ children, className, align = 'left' }: { children?: React.ReactNode; className?: string; align?: 'left' | 'right' | 'center' }) {
   return (
-    <th className={cn('border-b border-line bg-sunken px-4 py-2 text-[11.5px] font-medium tracking-wide whitespace-nowrap text-ink-3 uppercase', align === 'right' && 'text-right', align === 'center' && 'text-center', className)}>
+    <th className={cn('border-b border-line bg-sunken px-4 py-2 text-[11.5px] font-medium tracking-wide whitespace-nowrap text-ink-3 uppercase', align === 'left' && 'text-left', align === 'right' && 'text-right', align === 'center' && 'text-center', className)}>
       {children}
     </th>
   )

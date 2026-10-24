@@ -43,6 +43,7 @@ export function ReservationDrawer({ resId, onClose }: { resId: string | null; on
         title={
           <span className="flex items-center gap-2">
             {g.firstName} {g.lastName} {g.vip && <VipMark />}
+            {g.blacklist && <span className="rounded bg-danger-soft px-1 text-[10.5px] font-semibold text-danger">BLACKLISTED</span>}
           </span>
         }
         description={
@@ -102,7 +103,12 @@ export function ReservationDrawer({ resId, onClose }: { resId: string | null; on
         </section>
 
         <section className="mt-6">
-          <h3 className="mb-1 text-[11px] font-semibold tracking-wide text-ink-3 uppercase">Guest</h3>
+          <div className="mb-1 flex items-baseline justify-between">
+            <h3 className="text-[11px] font-semibold tracking-wide text-ink-3 uppercase">Guest</h3>
+            <Link href={`/guests/${g.id}`} className="text-xs font-medium text-brand hover:underline">
+              Full profile
+            </Link>
+          </div>
           <dl className="divide-y divide-line">
             <KeyValue label="Phone">
               <a href={`tel:${g.phone}`} className="inline-flex items-center gap-1.5 hover:text-brand">

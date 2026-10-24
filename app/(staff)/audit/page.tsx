@@ -16,6 +16,9 @@ const MODULE_TONE: Record<Module, Tone> = {
   POS: 'warn',
   Housekeeping: 'ok',
   Maintenance: 'danger',
+  Guests: 'info',
+  Rates: 'brass',
+  Settings: 'neutral',
   System: 'neutral',
 }
 

@@ -1,21 +1,25 @@
 import { parseISO } from 'date-fns'
-import { HOTEL, ROOM_TYPES } from './config'
+import { HOTEL, ROOM_TYPES, ROUTE_ACCESS, type HotelSettings } from './config'
 import { dateRange, isWeekend, nightsBetween, shift } from './dates'
 import { withTaxes } from './pricing'
 import type {
   AuditEntry,
   Charge,
+  DayRule,
   Dept,
   Guest,
   HistoryDay,
   HkStatus,
   Payment,
   PayMethod,
+  Promo,
   RatePlan,
   Reservation,
   ResStatus,
   Room,
+  Role,
   RoomTypeId,
+  Season,
   Source,
   Task,
 } from './types'
@@ -33,6 +37,14 @@ export interface HotelData {
   history: HistoryDay[]
   tickets: import('./types').PosTicket[]
   counters: { reservation: number; check: number; invoice: number; id: number }
+  baseRates: Record<RoomTypeId, number>
+  weekendUplift: number
+  seasons: Season[]
+  dayRules: Record<string, DayRule>
+  promos: Promo[]
+  settings: Partial<HotelSettings>
+  permissions: Record<string, Role[]>
+  voidNeedsApproval: boolean
 }
 
 /** Deterministic PRNG so every reset produces the same history. */
@@ -96,6 +108,23 @@ const GUESTS: Guest[] = [
   { id: 'g30', firstName: 'Thomas', lastName: 'Reid', phone: '+44 7911 123456', email: 't.reid@reidconsult.co.uk', nationality: 'British', stays: 0, preferences: [] },
   { id: 'g31', firstName: 'Bisi', lastName: 'Lawal', phone: '+234 802 556 1023', email: 'bisi.lawal@gmail.com', nationality: 'Nigerian', stays: 2, preferences: [] },
   { id: 'g32', firstName: 'Kelechi', lastName: 'Nnaji', phone: '+234 816 772 3305', email: 'kelechi.nnaji@gmail.com', nationality: 'Nigerian', stays: 0, preferences: [] },
+  { id: 'g33', firstName: 'Adebola', lastName: 'Ogunbiyi', phone: '+234 809 112 4478', email: 'bola.ogunbiyi@gmail.com', nationality: 'Nigerian', stays: 1, preferences: [] },
+  { id: 'g34', firstName: 'Samuel', lastName: 'Owusu', phone: '+233 24 667 1092', email: 's.owusu@gmail.com', nationality: 'Ghanaian', stays: 0, preferences: [] },
+  { id: 'g35', firstName: 'Olivia', lastName: 'Hartmann', phone: '+49 160 552 7718', email: 'o.hartmann@web.de', nationality: 'German', stays: 0, preferences: ['Quiet room'] },
+  { id: 'g36', firstName: 'Nnamdi', lastName: 'Okeke', phone: '+234 803 559 2210', email: 'nnamdi.okeke@gmail.com', nationality: 'Nigerian', stays: 3, preferences: [] },
+  { id: 'g37', firstName: 'Bukola', lastName: 'Alade', phone: '+234 806 220 1934', email: 'bukola.alade@gmail.com', nationality: 'Nigerian', stays: 0, preferences: [] },
+  { id: 'g38', firstName: 'David', lastName: 'Clarke', phone: '+44 7700 900877', email: 'dclarke@clarkeassoc.co.uk', nationality: 'British', stays: 0, preferences: [] },
+  { id: 'g39', firstName: 'Ifeanyi', lastName: 'Umeh', phone: '+234 805 442 0193', email: 'ifeanyi.umeh@kestrelenergy.ng', nationality: 'Nigerian', company: 'Kestrel Energy Ltd', stays: 4, preferences: [] },
+  { id: 'g40', firstName: 'Marco', lastName: 'Bianchi', phone: '+39 347 112 9083', email: 'marco.bianchi@libero.it', nationality: 'Italian', stays: 0, preferences: [] },
+  { id: 'g41', firstName: 'Temitope', lastName: 'Ajayi', phone: '+234 802 980 3375', email: 'tope.ajayi@gmail.com', nationality: 'Nigerian', vip: true, stays: 5, preferences: ['Lagoon view'] },
+  { id: 'g42', firstName: 'Grace', lastName: 'Okoro', phone: '+234 813 664 2290', email: 'grace.okoro@gmail.com', nationality: 'Nigerian', stays: 1, preferences: [] },
+  { id: 'g43', firstName: 'Kofi', lastName: 'Boateng', phone: '+233 50 118 2245', email: 'kofi.boateng@gmail.com', nationality: 'Ghanaian', stays: 0, preferences: [] },
+  { id: 'g44', firstName: 'Usman', lastName: 'Garba', phone: '+234 806 773 1188', email: 'usman.garba@gmail.com', nationality: 'Nigerian', stays: 2, preferences: [] },
+  { id: 'g45', firstName: 'Chioma', lastName: 'Eze', phone: '+234 809 440 7726', email: 'chioma.eze@gmail.com', nationality: 'Nigerian', stays: 0, preferences: [] },
+  // Same person as g4, booked once by phone with a personal email: shows up as a possible duplicate.
+  { id: 'g47', firstName: 'Chiamaka', lastName: 'Nwosu', phone: '0809 774 1203', email: 'chiamaka.nwosu@gmail.com', nationality: 'Nigerian', stays: 2, preferences: ['Extra towels'] },
+  { id: 'g48', firstName: 'Peter', lastName: 'Adamu', phone: '+234 807 115 6623', email: 'p.adamu@yahoo.com', nationality: 'Nigerian', stays: 1, preferences: [], blacklist: { reason: 'Left without settling a ₦145,000 bill (Room 206, March 2026)', at: '2026-03-14T09:30:00', by: 'u-gm' } },
+  { id: 'g46', firstName: 'Ahmed', lastName: 'Saleh', phone: '+971 50 334 8812', email: 'a.saleh@gulfline.ae', nationality: 'Emirati', stays: 0, preferences: [] },
 ]
 
 interface ResSpec {
@@ -174,6 +203,23 @@ const RESERVATIONS: ResSpec[] = [
   { guest: 'g26', room: '101', type: 'STD', in: 6, out: 9, status: 'confirmed', source: 'Phone' },
   { guest: 'g27', room: null, type: 'DLX', in: 1, out: 3, status: 'confirmed', source: 'Booking.com', notes: 'OTA booking — assign room' },
   { guest: 'g28', room: null, type: 'STD', in: 2, out: 4, status: 'confirmed', source: 'Expedia', notes: 'OTA booking — assign room' },
+  { guest: 'g44', room: '102', type: 'STD', in: 4, out: 8, status: 'confirmed', source: 'Phone' },
+  { guest: 'g46', room: '205', type: 'DLX', in: 5, out: 8, status: 'confirmed', source: 'Booking.com' },
+  { guest: 'g39', room: '206', type: 'DLX', in: 6, out: 9, status: 'confirmed', source: 'Corporate', plan: 'Corporate' },
+  { guest: 'g45', room: '303', type: 'DLX', in: 6, out: 9, status: 'confirmed', source: 'Website', paid: { method: 'Paystack', amount: 'night', ref: 'PSK-T88242210' } },
+  { guest: 'g37', room: '103', type: 'STD', in: 7, out: 10, status: 'confirmed', source: 'Website', paid: { method: 'Paystack', amount: 'full', ref: 'PSK-T88242517' } },
+  { guest: 'g40', room: '302', type: 'DLX', in: 7, out: 12, status: 'confirmed', source: 'Expedia' },
+  { guest: 'g38', room: '204', type: 'STD', in: 8, out: 11, status: 'confirmed', source: 'Booking.com' },
+  { guest: 'g41', room: '307', type: 'EXS', in: 8, out: 10, status: 'confirmed', source: 'Phone', notes: 'VIP — returning guest' },
+  { guest: 'g42', room: '202', type: 'STD', in: 9, out: 13, status: 'confirmed', source: 'Website' },
+  { guest: 'g43', room: '208', type: 'DLX', in: 10, out: 12, status: 'confirmed', source: 'Booking.com' },
+  { guest: 'g47', room: '301', type: 'DLX', in: 11, out: 13, status: 'confirmed', source: 'Phone', notes: 'Booked by phone — check for existing profile' },
+  // More in-house guests so tonight reads like a normal Saturday
+  { guest: 'g33', room: '105', type: 'STD', in: -1, out: 2, status: 'checked_in', source: 'Phone', paid: { method: 'Cash', amount: 50000 } },
+  { guest: 'g34', room: '208', type: 'DLX', in: -2, out: 1, status: 'checked_in', source: 'Booking.com' },
+  { guest: 'g35', room: '305', type: 'EXS', in: -1, out: 3, status: 'checked_in', source: 'Expedia', paid: { method: 'Card', amount: 'full', ref: 'POS-AUTH 451187' } },
+  { guest: 'g36', room: '202', type: 'STD', in: -2, out: 1, status: 'checked_in', source: 'Website', paid: { method: 'Paystack', amount: 'full', ref: 'PSK-T88201164' },
+    extras: [{ day: -1, dept: 'Restaurant', desc: 'Restaurant · Check #1035', amount: 13500 }] },
   // Recent departures and a cancellation
   { guest: 'g29', room: '103', type: 'STD', in: -4, out: -1, status: 'checked_out', source: 'Website', paid: { method: 'Paystack', amount: 'full', ref: 'PSK-T88170023' } },
   { guest: 'g30', room: '204', type: 'STD', in: -3, out: -1, status: 'checked_out', source: 'Booking.com', paid: { method: 'Card', amount: 'full', ref: 'POS-AUTH 440913' } },
@@ -325,7 +371,8 @@ export function buildSeed(today: string): HotelData {
     businessDate: today,
     nightAuditDone: false,
     rooms,
-    guests: GUESTS,
+    // Roughly two in three guests opted in to marketing when they first booked.
+    guests: GUESTS.map((g, i) => ({ ...g, marketing: g.marketing ?? i % 3 !== 2 })),
     reservations,
     charges,
     payments,
@@ -334,5 +381,26 @@ export function buildSeed(today: string): HotelData {
     history,
     tickets: [],
     counters: { reservation: resCounter, check: 1043, invoice: 8851, id: idSeq + 1000 },
+    baseRates: { STD: 35000, DLX: 50000, EXS: 85000 },
+    weekendUplift: 0.1,
+    seasons: [
+      { id: 'se1', name: 'Trade fair week', start: shift(today, 5), end: shift(today, 9), adjust: 0.15 },
+      { id: 'se2', name: 'Festive peak', start: `${today.slice(0, 4)}-12-18`, end: `${Number(today.slice(0, 4)) + 1}-01-03`, adjust: 0.35 },
+    ],
+    dayRules: {
+      [`EXS|${shift(today, 1)}`]: { price: 95000 },
+      [`STD|${shift(today, 6)}`]: { stopSell: true },
+      [`STD|${shift(today, 7)}`]: { stopSell: true },
+      [`DLX|${shift(today, 5)}`]: { minStay: 2 },
+      [`EXS|${shift(today, 5)}`]: { minStay: 2 },
+    },
+    promos: [
+      { code: 'DIRECT10', percent: 10, validUntil: shift(today, 60), uses: 14, active: true, note: 'Website exclusive' },
+      { code: 'KESTREL15', percent: 15, validUntil: shift(today, 200), uses: 9, active: true, note: 'Kestrel Energy staff' },
+      { code: 'RAINY20', percent: 20, validUntil: shift(today, -12), uses: 31, active: false, note: 'Rainy-season campaign (ended)' },
+    ],
+    settings: {},
+    permissions: structuredClone(ROUTE_ACCESS),
+    voidNeedsApproval: true,
   }
 }

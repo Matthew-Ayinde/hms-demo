@@ -23,6 +23,7 @@ export default function ReservationsPage() {
   const rooms = useHotel((s) => s.rooms)
   const reservations = useHotel((s) => s.reservations)
   const moveReservation = useHotel((s) => s.moveReservation)
+  const baseRates = useHotel((s) => s.baseRates)
   const { guest } = useLookups()
 
   const [start, setStart] = useState(() => shift(today, -2))
@@ -138,7 +139,7 @@ export default function ReservationsPage() {
             <>
               <GroupHeader label="Unassigned" meta={`${unassigned.length} ${unassigned.length === 1 ? 'booking' : 'bookings'} waiting for a room — drag onto a room`} warn />
               {unassigned.map((r) => (
-                <Row key={r.id} label={<span className="text-warn">Unassigned</span>} sub={ROOM_TYPES.find((t) => t.id === r.typeId)!.name} days={days} today={today}>
+                <Row key={r.id} label={<span className="text-warn">Unassigned</span>} sub={ROOM_TYPES.find((t) => t.id === r.typeId)!.name.split(' ')[0]} days={days} today={today}>
                   <Bar res={r} start={start} guestLabel={label(guest(r.guestId))} vip={!!guest(r.guestId).vip} onOpen={() => setOpenRes(r.id)} onDragStart={(offset) => setDragging({ id: r.id, grabOffset: offset })} onDragEnd={() => setDragging(null)} dimmed={dragging?.id === r.id} />
                 </Row>
               ))}
@@ -149,7 +150,7 @@ export default function ReservationsPage() {
             const typeRooms = rooms.filter((r) => r.typeId === type.id)
             return (
               <div key={type.id}>
-                <GroupHeader label={type.name} meta={`${typeRooms.length} rooms · rack rate ${naira(type.rate)}`} />
+                <GroupHeader label={type.name} meta={`${typeRooms.length} rooms · base rate ${naira(baseRates[type.id])}`} />
                 {typeRooms.map((room) => (
                   <Row
                     key={room.id}

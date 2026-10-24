@@ -10,7 +10,7 @@ import { RoomStateBadge, SourceLabel, VipMark } from '@/components/status'
 import { Badge, Button, EmptyState, Input, PageHeader, Panel, Table, Tabs, Td, Th, cn } from '@/components/ui'
 import { ROOM_TYPES } from '@/lib/config'
 import { fmtDate, fmtTime, nightsBetween } from '@/lib/dates'
-import { naira } from '@/lib/format'
+import { naira, plural } from '@/lib/format'
 import { roomTypeOf, useBalances, useFrontDeskLists, useLookups } from '@/lib/hooks'
 import { stayQuote } from '@/lib/pricing'
 import { isReady, occupants, roomState, ROOM_STATE_META, type RoomState } from '@/lib/rooms'
@@ -132,7 +132,7 @@ export default function FrontDeskPage() {
                         <div className="text-xs text-ink-3">{roomTypeOf(r.typeId).name}</div>
                       </Td>
                       <Td>
-                        <div>{nightsBetween(r.checkIn, r.checkOut)} nights</div>
+                        <div>{plural(nightsBetween(r.checkIn, r.checkOut), 'night')}</div>
                         <div className="text-xs text-ink-3">until {fmtDate(r.checkOut, 'EEE d MMM')}</div>
                       </Td>
                       <Td className="num">{arrived ? <span className="text-ink-3">In at {fmtTime(r.checkedInAt!)}</span> : (r.eta ?? '—')}</Td>
@@ -185,7 +185,7 @@ export default function FrontDeskPage() {
                     <Td className="font-medium">{room(r.roomId)?.number}</Td>
                     <Td>
                       {fmtDate(r.checkIn)} – {fmtDate(r.checkOut)}
-                      <div className="text-xs text-ink-3">{nightsBetween(r.checkIn, r.checkOut)} nights</div>
+                      <div className="text-xs text-ink-3">{plural(nightsBetween(r.checkIn, r.checkOut), 'night')}</div>
                     </Td>
                     <Td>
                       <SourceLabel source={r.source} />

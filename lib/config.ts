@@ -5,23 +5,24 @@ import type { MenuItem, Role, RoomType, Source, StaffUser, StockAlert } from './
  * rates for the client's real ones before the demo.
  */
 export const HOTEL = {
-  name: 'Lagoon View Hotel',
-  shortName: 'Lagoon View',
+  name: 'Serena Hotel and Suites',
+  shortName: 'Serena',
+  // Placeholders below: replace with the hotel's real location and contact details.
   tagline: 'Victoria Island, Lagos',
   address: '14 Ozumba Mbadiwe Avenue, Victoria Island, Lagos',
   phone: '+234 802 555 0147',
-  email: 'reservations@lagoonview.ng',
-  website: 'lagoonview.ng',
+  email: 'reservations@serenahotelandsuites.ng',
+  website: 'serenahotelandsuites.ng',
   tin: '21874563-0001',
   rcNumber: 'RC 1482297',
-  codePrefix: 'LV',
+  codePrefix: 'SH',
   serviceRate: 0.1,
   vatRate: 0.075,
   checkInTime: '14:00',
   checkOutTime: '12:00',
   /** Manager PIN used to approve voids and discounts in the demo. */
   managerPin: '2580',
-  bank: { name: 'Zenith Bank', account: '1014 882 731', accountName: 'Lagoon View Hotels Ltd' },
+  bank: { name: 'Zenith Bank', account: '1014 882 731', accountName: 'Serena Hotel and Suites Ltd' },
 }
 
 export const ROOM_TYPES: RoomType[] = [
